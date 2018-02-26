@@ -1,13 +1,13 @@
 # *************************************************************** #
 # *************************************************************** #
-# WIKI PRICES TRADING MODEL
+# Stock Visualization
 # *************************************************************** #
 # *************************************************************** #
 # - Carson Goeke 
-# - 11/30/2017
+# - 2/26/2018
 #
-# This script is used to pick stocks from Quandl's WIKI/PRICES dataset.
-# It alose makes use of their Federal Reserve Economic Data (FRED), as
+# This script is used to visualize stocks from Quandl's WIKI/PRICES dataset.
+# It also makes use of their Federal Reserve Economic Data (FRED), as
 # well NASDAQ's industy codes
 
 # Load Packages ---------------------------------------------------------------------------------
@@ -23,7 +23,6 @@ library(ggridges) # ridge plot extension
 library(dplyr) # data munging / grouping / summarising
 
 # Load Data ---------------------------------------------------------------------------------
-
 # Quandl API key
 api.key <- 'sEsKbUQEbjvokfsfpUzo'
 Quandl.api_key(api.key)
@@ -33,7 +32,6 @@ wiki.prices <- fread("~/Desktop/wiki_prices/WIKI_PRICES_212b326a081eacca455e1314
  as.data.frame(stringsAsFactors = FALSE)
 
 # Preprocessing Data ---------------------------------------------------------------------------------
-
 # Changing data types
 wiki.prices$date %<>% as.Date()
 wiki.prices$adj_volume %<>% as.numeric()
@@ -74,7 +72,6 @@ colnames(wiki.prices) <- gsub(" ", ".", colnames(wiki.prices))
 colnames(wiki.prices) <- gsub("-", "_", colnames(wiki.prices))
 
 # plots ------------------------------------------------------------------------
-
 # Ridges
 ridge_return <- wiki.prices %>%
   ggplot(aes(return, Sector, fill = Sector)) +
@@ -140,8 +137,6 @@ rm(sectors)
 colnames(industries)[1] <- "ticker"
 
 
-
-
 # /////////////////////////////////////////////////////////////// #
 # Data Exploration
 # /////////////////////////////////////////////////////////////// #
@@ -150,9 +145,6 @@ colnames(industries)[1] <- "ticker"
 tickers <- levels(as.factor(wiki.prices$ticker))
 
 # Get Industry for each ticker
-
-
-
 most.recent <- wiki.prices[wiki.prices$date == max(wiki.prices$date),]
 cheap <- most.recent[most.recent$adj_close < 30, ]
 wiki.prices <- wiki.prices[wiki.prices$ticker %in% cheap$ticker,]
@@ -161,7 +153,6 @@ wiki.prices <- wiki.prices[order(wiki.prices$ticker),]
 tickers <- levels(as.factor(wiki.prices$ticker))
 wiki.prices$one.week.avg <- NA
 wiki.prices$one.month.avg <- NA
-#wiki.prices$three.month.avg <- NA
 
 # We want to calculate the moving average for each ticker
 library(progress)
@@ -171,10 +162,8 @@ for (i in 1:length(tickers)) {
   series     <- ts(wiki.prices[wiki.prices$ticker == ticker,"adj_close"])
   one.week.avg    <- as.numeric(SMA(series, n = 5)) # markets are only open 5 days a week
   one.month.avg   <- as.numeric(SMA(series, n = 20)) # four, five-day weeks
-  #three.month.avg <- as.numeric(SMA(series, n = 60)) # 3 months
   wiki.prices[wiki.prices$ticker == ticker, "one.week.avg"]    <- one.week.avg
   wiki.prices[wiki.prices$ticker == ticker, "one.month.avg"]   <- one.month.avg
- # wiki.prices[wiki.prices$ticker == ticker, "three.month.avg"] <- three.month.avg
   pb$tick()
 }
 
