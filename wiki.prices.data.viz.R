@@ -1,19 +1,18 @@
 # *************************************************************** #
 # *************************************************************** #
-# Stock Visualization
+# WIKI PRICES TRADING MODEL
 # *************************************************************** #
 # *************************************************************** #
 # - Carson Goeke 
-# - 2/26/2018
+# - 11/30/2017
 #
-# This script is used to visualize stocks from Quandl's WIKI/PRICES dataset.
-# It also makes use of their Federal Reserve Economic Data (FRED), as
+# This script is used to pick stocks from Quandl's WIKI/PRICES dataset.
+# It alose makes use of their Federal Reserve Economic Data (FRED), as
 # well NASDAQ's industy codes
 
 # Load Packages ---------------------------------------------------------------------------------
 library(Quandl) # data API
 library(ggplot2) # data visualization
-#library(TTR)
 library(DataCombine) # times series variables  
 library(magrittr) # pipe operator
 library(data.table) # fread
@@ -41,18 +40,23 @@ wiki.prices$split_ratio %<>% as.numeric()
 not.adjusted <- c("open", "high", "low", "close", "volume")
 wiki.prices[,not.adjusted] <- NULL
 
-# calculating log returns
-# first get lagged adjusted close
-wiki.prices <- slide(wiki.prices,
-                     Var = "adj_close",
-                     TimeVar = 'date',
-                     GroupVar = "ticker",
-                     slideBy = 1,
-                     NewVar = "adj_close_1")
-
-# calculate returns from lagged values
-wiki.prices$return <- (wiki.prices$adj_close - wiki.prices$adj_close_1) / wiki.prices$adj_close_1
+# calculate daily returns from adjusted open and closing prices
+wiki.prices$return <- (wiki.prices$adj_close - wiki.prices$adj_open) / wiki.prices$adj_open
 wiki.prices <- na.omit(wiki.prices)
+wiki.prices$log_return <- log(wiki.prices$return + 1)
+
+# look at companies that have at least been around for a while
+older_companies <- wiki.prices %>% group_by(ticker) %>% summarize(min_date = min(date))
+older_companies <- older_companies[older_companies$min_date <= as.Date('2008-01-02'),] # around a decade
+wiki.prices <- wiki.prices[wiki.prices$ticker %in% older_companies$ticker, ]
+wiki.prices <- wiki.prices[wiki.prices$date >= as.Date('2008-01-02'),]
+
+# calculate returns from the minimum date
+min_date <- wiki.prices[wiki.prices$date == as.Date('2008-01-02'),c('ticker','adj_open')]
+colnames(min_date)[2] <- 'min_date_open'
+wiki.prices <- merge(wiki.prices, min_date, by = 'ticker', all.x = TRUE)
+wiki.prices$return_to_date <- (wiki.prices$adj_close - wiki.prices$min_date_open) / wiki.prices$min_date_open
+wiki.prices$log_return_to_date <- log(wiki.prices$return_to_date + 1)
 
 # Getting industry classification
 industry.files <- list.files("~/Desktop/industries")
@@ -64,7 +68,6 @@ for (i in 2:length(industry.files)) {
 # only keep stocks we have industry info on
 wiki.prices <- wiki.prices[wiki.prices$ticker %in% industries$Symbol,]
 colnames(industries)[1] <- "ticker"
-industries <- industries[,c("ticker", "Sector")]
 
 # merging with orginal df
 wiki.prices <- merge(wiki.prices, industries, by = "ticker", all.x = TRUE)
@@ -81,19 +84,18 @@ ridge_return <- wiki.prices %>%
   xlab('One Day Return (Closing Price)') +
   ylab('Sector') +
   scale_fill_cyclical(values = c("#3E99F6", "#FFC300"))
-
-wiki.prices$alr <- log(wiki.prices$return + 1)
 ridge_return
 
-ridge_alr <- wiki.prices %>%
-  ggplot(aes(alr, Sector, fill = Sector)) +
-  geom_density_ridges(bandwidth = 2) +
-  ggtitle('Daily Stock Log Returns by Sector') +
+ridge_returns2date <- wiki.prices %>%
+  ggplot(aes(log_return, Sector, fill = Sector)) +
+  geom_density_ridges(bandwidth = 1) +
+  ggtitle('Returns to Date by Sector') +
   theme(legend.position = "none")  +
-  xlab('One Day Log Return (Closing Price)') +
+  xlab('Return from Jan 2nd 2008') +
   ylab('Sector') +
   scale_fill_cyclical(values = c("#3E99F6", "#FFC300"))
-ridge_alr
+ridge_returns2date
+
 
 # Points
 point_return <- wiki.prices %>% group_by(Sector) %>% summarise(mean_return = mean(return)) %>%
@@ -104,11 +106,11 @@ point_return <- wiki.prices %>% group_by(Sector) %>% summarise(mean_return = mea
     ylab('Sector')
 point_return
 
-point_alr <- wiki.prices %>% group_by(Sector) %>% summarise(mean_alr = mean(alr)) %>%
-  ggplot(aes(mean_alr, Sector)) +
+point_alr <- wiki.prices %>% group_by(Sector) %>% summarise(mean_return_to_date = mean(return_to_date)) %>%
+  ggplot(aes(mean_return_to_date, Sector)) +
   geom_point() +
-  ggtitle('Mean Daily Log Return by Sector') +
-  xlab('Average Log Return') +
+  ggtitle('Mean Return to Date by Sector') +
+  xlab('Mean Return to Date by Secot') +
   ylab('Sector')
 point_alr
 
@@ -121,26 +123,31 @@ smooth_return <- wiki.prices %>% group_by(date, Sector) %>% summarise(mean_retur
   ylab('Average Daily Return')
 smooth_return
 
-smooth_alr <- wiki.prices %>% group_by(date, Sector) %>% summarise(mean_alr= mean(alr)) %>%
-  ggplot(aes(date, mean_alr, color = Sector, fill = Sector)) +
+smooth_return2date <- wiki.prices %>% group_by(date, Sector) %>% summarise(mean_return2date= mean(return_to_date)) %>%
+  ggplot(aes(date, mean_return2date, color = Sector, fill = Sector)) +
   geom_smooth(se=FALSE) +
-  ggtitle('Average Daily Log Returns over Time by Sector') +
+  ggtitle('Return to Date over Time by Sector') +
   xlab('Date') +
   ylab('Average Daily Return')
-smooth_alr
+smooth_return2date
 
-# convert industry to indicator variables
-sectors <- as.data.frame(model.matrix(~industries$Sector - 1))
-colnames(sectors) <- levels(as.factor(industries$Sector))
-industries <- as.data.frame(cbind(industries$ticker, sectors), stringsAsFactors = FALSE)
-rm(sectors)
-colnames(industries)[1] <- "ticker"
+line_return2date <- wiki.prices %>% group_by(date, Sector) %>% summarise(mean_return2date = mean(return_to_date)) %>%
+  ggplot(aes(date, mean_return2date, color = Sector, fill = Sector)) +
+  geom_line() +
+  ggtitle('Return to Date over Time by Sector') +
+  xlab('Date') +
+  ylab('Average Daily Return') +
+  scale_y_log10()
+line_return2date
 
 
+
+# EVERYTHING BELOW IS OLD AND SHOULD BE IGNORED UNTIL CODE IS REFACTORED --------------------------------------------------
+# dummy function to prevent code evaluation (like commenting out all of the code)
+f <- function() {
 # /////////////////////////////////////////////////////////////// #
 # Data Exploration
 # /////////////////////////////////////////////////////////////// #
-
 # Over 3100 total tickers
 tickers <- levels(as.factor(wiki.prices$ticker))
 
@@ -153,6 +160,7 @@ wiki.prices <- wiki.prices[order(wiki.prices$ticker),]
 tickers <- levels(as.factor(wiki.prices$ticker))
 wiki.prices$one.week.avg <- NA
 wiki.prices$one.month.avg <- NA
+#wiki.prices$three.month.avg <- NA
 
 # We want to calculate the moving average for each ticker
 library(progress)
@@ -162,8 +170,10 @@ for (i in 1:length(tickers)) {
   series     <- ts(wiki.prices[wiki.prices$ticker == ticker,"adj_close"])
   one.week.avg    <- as.numeric(SMA(series, n = 5)) # markets are only open 5 days a week
   one.month.avg   <- as.numeric(SMA(series, n = 20)) # four, five-day weeks
+  #three.month.avg <- as.numeric(SMA(series, n = 60)) # 3 months
   wiki.prices[wiki.prices$ticker == ticker, "one.week.avg"]    <- one.week.avg
   wiki.prices[wiki.prices$ticker == ticker, "one.month.avg"]   <- one.month.avg
+ # wiki.prices[wiki.prices$ticker == ticker, "three.month.avg"] <- three.month.avg
   pb$tick()
 }
 
@@ -667,4 +677,4 @@ g <- ggplot(forecast, aes(date, adj_close, color = ticker, fill = ticker)) +
   geom_smooth() #+
   #theme(legend.position="none")
 g
-
+}
