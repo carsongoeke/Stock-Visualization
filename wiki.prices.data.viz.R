@@ -28,7 +28,7 @@ Quandl.api_key(api.key)
 
 # Load Stock Prices
 wiki.prices <- fread("~/Desktop/wiki_prices/WIKI_PRICES_212b326a081eacca455e13140d7bb9db.csv") %>% 
- as.data.frame(stringsAsFactors = FALSE)
+  as.data.frame(stringsAsFactors = FALSE)
 
 # Preprocessing Data ---------------------------------------------------------------------------------
 # Changing data types
@@ -74,6 +74,24 @@ wiki.prices <- merge(wiki.prices, industries, by = "ticker", all.x = TRUE)
 colnames(wiki.prices) <- gsub(" ", ".", colnames(wiki.prices))
 colnames(wiki.prices) <- gsub("-", "_", colnames(wiki.prices))
 
+# Creating a Capitalization Variable
+wiki.prices$cap_size <- ''
+wiki.prices[wiki.prices$MarketCap >= 200000000000,'cap_size'] <- 'mega'
+wiki.prices[wiki.prices$MarketCap < 200000000000 & 
+              wiki.prices$MarketCap >= 10000000000,'cap_size'] <- 'large'
+wiki.prices[wiki.prices$MarketCap < 10000000000 & 
+              wiki.prices$MarketCap >= 2000000000,'cap_size'] <- 'mid'
+wiki.prices[wiki.prices$MarketCap < 2000000000 & 
+              wiki.prices$MarketCap >= 300000000,'cap_size'] <- 'small'
+wiki.prices[wiki.prices$MarketCap < 300000000 & 
+              wiki.prices$MarketCap >= 50000000,'cap_size'] <- 'micro'
+wiki.prices[wiki.prices$MarketCap < 50000000,'cap_size'] <- 'nano'
+
+# Subset and make sure only weekdays to make sure graphs aren't thrown off
+wiki.prices$weekday <- weekdays(wiki.prices$date, abbreviate = TRUE)
+wiki.prices <- wiki.prices[wiki.prices$weekday != 'Sat',]
+wiki.prices <- wiki.prices[wiki.prices$weekday != 'Sun',]
+
 # plots ------------------------------------------------------------------------
 # Ridges
 ridge_return <- wiki.prices %>%
@@ -86,33 +104,45 @@ ridge_return <- wiki.prices %>%
   scale_fill_cyclical(values = c("#3E99F6", "#FFC300"))
 ridge_return
 
-ridge_returns2date <- wiki.prices %>%
-  ggplot(aes(log_return, Sector, fill = Sector)) +
+ridge_rtd <- wiki.prices %>%
+  ggplot(aes(retrun_to_date, Sector, fill = Sector)) +
   geom_density_ridges(bandwidth = 1) +
   ggtitle('Returns to Date by Sector') +
   theme(legend.position = "none")  +
   xlab('Return from Jan 2nd 2008') +
   ylab('Sector') +
   scale_fill_cyclical(values = c("#3E99F6", "#FFC300"))
-ridge_returns2date
-
+ridge_rtd
 
 # Points
 point_return <- wiki.prices %>% group_by(Sector) %>% summarise(mean_return = mean(return)) %>%
   ggplot(aes(mean_return, Sector)) +
-    geom_point() +
-    ggtitle('Mean Daily Return by Sector') +
-    xlab('Average Daily') +
-    ylab('Sector')
+  geom_point() +
+  ggtitle('Mean Daily Return by Sector') +
+  xlab('Average Daily') +
+  ylab('Sector')
 point_return
 
-point_alr <- wiki.prices %>% group_by(Sector) %>% summarise(mean_return_to_date = mean(return_to_date)) %>%
+point_return_by_cap <- wiki.prices %>% group_by(cap_size) %>% summarise(mean_return = mean(return)) %>%
+  ggplot(aes(mean_return, cap_size)) +
+  geom_point() +
+  ggtitle('Mean Daily Return by Sector') +
+  xlab('Average Daily') +
+  ylab('Market Capitalization')
+point_return_by_cap
+
+point_rtd <- wiki.prices %>% group_by(Sector) %>% summarise(mean_return_to_date = mean(return_to_date)) %>%
   ggplot(aes(mean_return_to_date, Sector)) +
   geom_point() +
   ggtitle('Mean Return to Date by Sector') +
   xlab('Mean Return to Date by Secot') +
   ylab('Sector')
-point_alr
+point_rtd
+
+return_by_vol <- wiki.prices %>%
+  ggplot(aes(adj_volume, return, fill = Sector, color = Sector)) +
+  geom_smooth(se=FALSE)
+return_by_vol
 
 # Smoothers
 smooth_return <- wiki.prices %>% group_by(date, Sector) %>% summarise(mean_return=mean(return)) %>%
@@ -123,14 +153,24 @@ smooth_return <- wiki.prices %>% group_by(date, Sector) %>% summarise(mean_retur
   ylab('Average Daily Return')
 smooth_return
 
-smooth_return2date <- wiki.prices %>% group_by(date, Sector) %>% summarise(mean_return2date= mean(return_to_date)) %>%
+smooth_rtd <- wiki.prices %>% group_by(date, Sector) %>% summarise(mean_return2date= mean(return_to_date)) %>%
   ggplot(aes(date, mean_return2date, color = Sector, fill = Sector)) +
-  geom_smooth(se=FALSE) +
+  geom_smooth() +
   ggtitle('Return to Date over Time by Sector') +
   xlab('Date') +
-  ylab('Average Daily Return')
-smooth_return2date
+  ylab('Average Return to Date')
+smooth_rtd
 
+smooth_rtd_by_cap <- wiki.prices %>% group_by(date, cap_size) %>% summarise(mean_return2date= mean(return_to_date)) %>%
+  ggplot(aes(date, mean_return2date, color = cap_size, fill = cap_size)) +
+  geom_smooth() +
+  ggtitle('Return to Date over Time by Market Cap') +
+  xlab('Date') +
+  ylab('Average Return to Date')
+smooth_rtd_by_cap
+
+
+# line plots
 line_return2date <- wiki.prices %>% group_by(date, Sector) %>% summarise(mean_return2date = mean(return_to_date)) %>%
   ggplot(aes(date, mean_return2date, color = Sector, fill = Sector)) +
   geom_line() +
@@ -140,14 +180,18 @@ line_return2date <- wiki.prices %>% group_by(date, Sector) %>% summarise(mean_re
   scale_y_log10()
 line_return2date
 
+# convert industry to indicator variables
+sectors <- as.data.frame(model.matrix(~industries$Sector - 1))
+colnames(sectors) <- levels(as.factor(industries$Sector))
+industries <- as.data.frame(cbind(industries$ticker, sectors), stringsAsFactors = FALSE)
+rm(sectors)
+colnames(industries)[1] <- "ticker"
 
 
-# EVERYTHING BELOW IS OLD AND SHOULD BE IGNORED UNTIL CODE IS REFACTORED --------------------------------------------------
-# dummy function to prevent code evaluation (like commenting out all of the code)
-f <- function() {
 # /////////////////////////////////////////////////////////////// #
 # Data Exploration
 # /////////////////////////////////////////////////////////////// #
+
 # Over 3100 total tickers
 tickers <- levels(as.factor(wiki.prices$ticker))
 
@@ -173,64 +217,64 @@ for (i in 1:length(tickers)) {
   #three.month.avg <- as.numeric(SMA(series, n = 60)) # 3 months
   wiki.prices[wiki.prices$ticker == ticker, "one.week.avg"]    <- one.week.avg
   wiki.prices[wiki.prices$ticker == ticker, "one.month.avg"]   <- one.month.avg
- # wiki.prices[wiki.prices$ticker == ticker, "three.month.avg"] <- three.month.avg
+  # wiki.prices[wiki.prices$ticker == ticker, "three.month.avg"] <- three.month.avg
   pb$tick()
 }
 
 # make one week worth of lags
 # use the slide function to create lagged variables for wiki.prices.data
 wiki.prices <- slide(wiki.prices,
-                         Var = "adj_open",
-                         GroupVar = "ticker",
-                         slideBy = -1,
-                         NewVar = "open.1")
+                     Var = "adj_open",
+                     GroupVar = "ticker",
+                     slideBy = -1,
+                     NewVar = "open.1")
 wiki.prices <- slide(wiki.prices,
-                      Var = "adj_close",
-                      GroupVar = "ticker",
-                      slideBy = -1,
-                      NewVar = "close.1")
+                     Var = "adj_close",
+                     GroupVar = "ticker",
+                     slideBy = -1,
+                     NewVar = "close.1")
 wiki.prices <- slide(wiki.prices,
-                      Var = "adj_high",
-                      GroupVar = "ticker",
-                      slideBy = -1,
-                      NewVar = "high.1")
+                     Var = "adj_high",
+                     GroupVar = "ticker",
+                     slideBy = -1,
+                     NewVar = "high.1")
 wiki.prices <- slide(wiki.prices,
-                      Var = "adj_low",
-                      GroupVar = "ticker",
-                      slideBy = -1,
-                      NewVar = "low.1")
+                     Var = "adj_low",
+                     GroupVar = "ticker",
+                     slideBy = -1,
+                     NewVar = "low.1")
 wiki.prices <- slide(wiki.prices,
-                      Var = "adj_volume",
-                      GroupVar = "ticker",
-                      slideBy = -1,
-                      NewVar = "volume.1")
+                     Var = "adj_volume",
+                     GroupVar = "ticker",
+                     slideBy = -1,
+                     NewVar = "volume.1")
 
 # week of close in future (to predict)
 wiki.prices <- slide(wiki.prices,
-                      Var = "adj_close",
-                      GroupVar = "ticker",
-                      slideBy = 1,
-                      NewVar = "future.close.1")
+                     Var = "adj_close",
+                     GroupVar = "ticker",
+                     slideBy = 1,
+                     NewVar = "future.close.1")
 wiki.prices <- slide(wiki.prices,
-                      Var = "adj_close",
-                      GroupVar = "ticker",
-                      slideBy = 2,
-                      NewVar = "future.close.2")
+                     Var = "adj_close",
+                     GroupVar = "ticker",
+                     slideBy = 2,
+                     NewVar = "future.close.2")
 wiki.prices <- slide(wiki.prices,
-                      Var = "adj_close",
-                      GroupVar = "ticker",
-                      slideBy = 3,
-                      NewVar = "future.close.3")
+                     Var = "adj_close",
+                     GroupVar = "ticker",
+                     slideBy = 3,
+                     NewVar = "future.close.3")
 wiki.prices <- slide(wiki.prices,
-                      Var = "adj_close",
-                      GroupVar = "ticker",
-                      slideBy = 4,
-                      NewVar = "future.close.4")
+                     Var = "adj_close",
+                     GroupVar = "ticker",
+                     slideBy = 4,
+                     NewVar = "future.close.4")
 wiki.prices <- slide(wiki.prices,
-                      Var = "adj_close",
-                      GroupVar = "ticker",
-                      slideBy = 5,
-                      NewVar = "future.close.5")
+                     Var = "adj_close",
+                     GroupVar = "ticker",
+                     slideBy = 5,
+                     NewVar = "future.close.5")
 
 # /////////////////////////////////////////////////////////////// #
 # Economic Indicators from Federal Reserve
@@ -605,13 +649,13 @@ r2.df$r2 <- 0
 pb <- progress_bar$new(total = length(tickers))
 for (i in 1:length(tickers)) {
   
-   temp <- tests[tests$ticker == tickers[i], num.cols]
-   temp.x <- as.matrix(temp[,!grepl("future", colnames(temp))])
-   temp.y <- as.matrix(temp[,grepl("future", colnames(temp))])
-   temp.est <- temp.x %*% bs
-   temp.err <- temp.y - temp.est
-   r2.df$r2[i] <- 1 - sum(temp.err^2) / (sum(temp.y^2))
-   pb$tick()
+  temp <- tests[tests$ticker == tickers[i], num.cols]
+  temp.x <- as.matrix(temp[,!grepl("future", colnames(temp))])
+  temp.y <- as.matrix(temp[,grepl("future", colnames(temp))])
+  temp.est <- temp.x %*% bs
+  temp.err <- temp.y - temp.est
+  r2.df$r2[i] <- 1 - sum(temp.err^2) / (sum(temp.y^2))
+  pb$tick()
 }
 rm(temp)
 rm(temp.x)
@@ -633,11 +677,11 @@ next.week.nums <- this.weekend[,num.cols]
 # predict this coming week
 this.weekend[,grepl("future", colnames(this.weekend))] <- as.matrix(next.week.nums[,!grepl("future", colnames(next.week.nums))]) %*% bs
 this.weekend$projected.growth <- ((this.weekend$future.close.5 - this.weekend$adj_close) +
-                                (this.weekend$future.close.4 - this.weekend$adj_close) +
-                                  (this.weekend$future.close.3 - this.weekend$adj_close) +
-                                (this.weekend$future.close.2 - this.weekend$adj_close) +
-                                  (this.weekend$future.close.1 - this.weekend$adj_close)) /
-                                 (5*this.weekend$adj_close)
+                                    (this.weekend$future.close.4 - this.weekend$adj_close) +
+                                    (this.weekend$future.close.3 - this.weekend$adj_close) +
+                                    (this.weekend$future.close.2 - this.weekend$adj_close) +
+                                    (this.weekend$future.close.1 - this.weekend$adj_close)) /
+  (5*this.weekend$adj_close)
 
 this.weekend <- this.weekend[order(this.weekend$projected.growth, decreasing = TRUE),]
 this.weekend <- this.weekend[this.weekend$projected.growth < 1, ]
@@ -656,10 +700,10 @@ for (i in 1:length(cheap.tickers)) {
   adj_close <- as.numeric(temp[1,28:32])
   ticker <- as.character(rep(temp$ticker[1], 5))
   dates <-  as.character(c(as.Date(temp$date[1]+1),
-             as.Date(temp$date[1]+2),
-             as.Date(temp$date[1]+3),
-             as.Date(temp$date[1]+4),
-             as.Date(temp$date[1]+5)))
+                           as.Date(temp$date[1]+2),
+                           as.Date(temp$date[1]+3),
+                           as.Date(temp$date[1]+4),
+                           as.Date(temp$date[1]+5)))
   projected.growth <- as.character(rep(temp$projected.growth[1], 5))
   temp <- as.data.frame(cbind(ticker, adj_close, dates, projected.growth), stringsAsFactors = FALSE)
   colnames(temp) <- colnames(forecast)
@@ -675,6 +719,5 @@ forecast$date <- as.Date(forecast$date)
 g <- ggplot(forecast, aes(date, adj_close, color = ticker, fill = ticker)) +
   geom_point() + 
   geom_smooth() #+
-  #theme(legend.position="none")
+#theme(legend.position="none")
 g
-}
